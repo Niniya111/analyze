@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据分析器</title>
+    <style>
+        body {
+            font-family: '黑体', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .container {
+            width: 80%;
+            max-width: 800px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            overflow: hidden; /* 确保没有不必要的滚动条 */
+        }
+        .input-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .input-group label {
+            margin-right: 10px;
+        }
+        .input-group input[type="file"] {
+            display: none;
+        }
+        .file-upload-button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background-color: #3498db;
+            color: white;
+            font-size: 16px;
+            display: inline-block;
+        }
+        .file-upload-button:hover {
+            background-color: #2980b9;
+        }
+        .button-group {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+        }
+        .button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background-color: #3498db;
+            color: white;
+            font-size: 16px;
+        }
+        .button:hover {
+            background-color: #2980b9;
+        }
+        .stats {
+            white-space: pre-wrap;
+            margin-bottom: 20px;
+        }
+        .chart-container {
+            position: relative;
+            height: 400px;
+            width: 100%;
+            overflow-x: auto; /* 启用水平滚动 */
+            white-space: nowrap; /* 防止画布换行 */
+        }
+        canvas {
+            position: absolute;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="input-group">
+            <label for="fileInput">输入文件路径：</label>
+            <input type="file" id="fileInput" accept=".txt">
+            <label for="fileInput" class="file-upload-button">选择文件</label>
+        </div>
+        <div class="input-group">
+            <label for="thresholdInput">异常阈值：</label>
+            <input type="number" id="thresholdInput" min="0" step="1" value="200">
+        </div>
+        <div class="button-group">
+            <button class="button" onclick="analyzeData()">分析</button>
+            <button class="button" onclick="performMultipleActions()">绘制</button>
+        </div>
+        <div class="stats" id="stats"></div>
+        <div class="chart-container">
+            <canvas id="plotCanvas"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        let chartLibraryLoaded = false;
+        let data = { timestamps: [], data: [] };
+        let threshold = 200;
+
+        function loadChartLibrary() {
+            if (!chartLibraryLoaded) {
+                const script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+                script.onload = () => {
+                    chartLibraryLoaded = true;
+                };
+                document.head.appendChild(script);
+            }
+        }
+        
+        function performMultipleActions() {
+            loadChartLibrary();
+            plotData();
+        }
+        
+        function readFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const lines = reader.result.trim().split('\n');
+                    const timestamps = [];
+                    const dataValues = [];
+                    
+                    for (let i = 0; i < lines.length; i += 2) {
+                        timestamps.push(...lines[i].trim().split(',').map(Number));
+                        dataValues.push(...lines[i + 1].trim().split(',').map(Number));
+                    }
+                    
+                    resolve({ timestamps, dataValues });
+                };
+                reader.onerror = reject;
+                reader.readAsText(file);
+            });
+        }
+
+        async function analyzeData() {
+            data = { timestamps: [], data: [] };
+            const ctx = document.getElementById('plotCanvas').getContext('2d');
+            ctx.clearRect(0, 0, plotCanvas.width, plotCanvas.height);
+
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput.files.length === 0) {
+                alert('请选择一个文件');
+                return;
+            }
+
+            threshold = parseInt(document.getElementById('thresholdInput').value);
+
+            try {
+                const result = await readFile(fileInput.files[0]);
+                data.timestamps = result.timestamps;
+                data.data = result.dataValues;
+
+                const mean = (data.data.reduce((a, b) => a + b, 0) / data.data.length).toFixed(2);
+                const std = Math.sqrt(data.data.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / data.data.length).toFixed(2);
+                const min = Math.min(...data.data).toFixed(2);
+                const max = Math.max(...data.data).toFixed(2);
+
+                // 查找异常值（连续值之间的差异大于阈值）
+                const anomalies = [];
+                for (let i = 1; i < data.data.length; i++) {
+                    if (Math.abs(data.data[i] - data.data[i - 1]) > threshold) {
+                        anomalies.push(data.timestamps[i]); // 收集异常值的时间戳
+                    }
+                }
+
+                // 显示统计信息，包括异常值
+                let statsText = `均值：${mean}\n标准差：${std}\n最小值：${min}\n最大值：${max}\n\n异常数据时间戳：${anomalies.join(', ')}`;
+
+                document.getElementById('stats').textContent = statsText;
+            } catch (error) {
+                document.getElementById('stats').textContent = `发生错误: ${error}`;
+            }
+        }
+
+        function plotData() {
+            if (data.timestamps.length === 0 || data.data.length === 0) {
+                alert('请先加载并分析数据');
+                return;
+            }
+
+            // 清除之前的图表实例（如果存在）
+            if (window.myChart) {
+                window.myChart.destroy();
+            }
+
+            const canvas = document.getElementById('plotCanvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const datasets = [{
+                label: '压力值',
+                data: data.data,
+                borderColor: 'blue',
+                backgroundColor: 'rgba(54, 162, 235, 0.2)', // 默认点的背景颜色
+                borderWidth: 2,
+                pointRadius: 3,
+                pointHoverRadius: 5,
+                tension: 0.1,
+                spanGaps: true  // 允许在缺失数据点上绘制线条
+            }];
+
+            // 准备数组以保存异常点的样式
+            const anomalyTimestamps = [];
+            for (let i = 1; i < data.data.length; i++) {
+                if (Math.abs(data.data[i] - data.data[i - 1]) > threshold) {
+                    anomalyTimestamps.push(data.timestamps[i]);
+                }
+            }
+
+            const pointStyles = data.timestamps.map(timestamp => {
+                if (anomalyTimestamps.includes(timestamp)) {
+                    return 'rect'; // 异常点的自定义样式（红色实心方块）
+                } else {
+                    return 'circle'; // 正常点的默认样式
+                }
+            });
+
+            window.myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.timestamps,
+                    datasets: [{
+                        ...datasets[0],
+                        pointBackgroundColor: pointStyles.map(style => style === 'rect' ? 'red' : 'blue'), // 异常点为红色，正常点为蓝色
+                        pointBorderColor: pointStyles.map(style => style === 'rect' ? 'red' : 'blue'), // 异常点边框为红色，正常点为蓝色
+                        pointStyle: pointStyles.map(style => style === 'rect' ? 'circle' : 'circle'), // 确保异常点显示为圆形
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: '时间/s'
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: '压力值'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+    </script>
+</body>
+</html>
